@@ -183,8 +183,9 @@ h1 span{display:inline-block; animation:rise .9s cubic-bezier(.2,.9,.25,1.25) bo
 .bar.s{border-start-start-radius:11px;border-end-start-radius:11px;margin-inline-start:3px}
 .bar.e{border-start-end-radius:11px;border-end-end-radius:11px;margin-inline-end:3px}
 .bar.short{white-space:normal;text-overflow:clip;line-height:1.05;font-size:11px;padding:0 3px;display:flex;align-items:center;justify-content:center;text-align:center;overflow-wrap:anywhere}
-.bar.spill{overflow:visible;z-index:2}
-.bar.spill span{position:absolute;left:0;top:0;bottom:0;display:flex;align-items:center;white-space:nowrap;padding:0 6px;border-radius:11px;background:var(--c)}
+.bar.float{overflow:visible;z-index:2;padding:0}
+.bar .flabel{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;white-space:nowrap;border-radius:11px;background:var(--c);box-shadow:0 2px 8px -2px rgba(0,0,0,.35);font-size:12.5px}
+.bar.holiday .flabel{background:var(--f-holiday);color:#12343b}
 .bar.tiny{padding:0;justify-content:center;display:flex;align-items:center;font-size:12px}
 .bar.holiday{background:repeating-linear-gradient(135deg,var(--f-holiday) 0 6px,color-mix(in srgb,var(--f-holiday) 70%,#fff) 6px 12px);color:#12343b;box-shadow:none}
 .bar.clash{outline:2px dashed var(--danger);outline-offset:1px}
@@ -289,6 +290,23 @@ footer{margin-top:28px;text-align:center;color:var(--ink-soft);font-size:13px}
 .sync i{width:7px;height:7px;border-radius:50%;background:#3bb273;display:inline-block}
 .sync.off i{background:var(--danger)}
 
+/* older Safari (iOS < 16.2) has no color-mix: plain fallbacks */
+@supports not (background: color-mix(in srgb, red 50%, blue)){
+  .fam .em,.up .date{background:var(--muted)}
+  .fam[aria-pressed="true"]{background:var(--muted);box-shadow:inset 0 0 0 1.5px var(--c)}
+  .day.past{background:none}
+  .day.sel{background:#ffe6cf}
+  .bar{box-shadow:none}
+  .bar.holiday{background:var(--f-holiday)}
+  .free button{border-color:var(--sea)}
+  .free button:hover{background:var(--muted)}
+  .hint button{background:rgba(255,255,255,.18)}
+  .warn{background:#fbe4e2}
+  .btn.danger{border-color:var(--danger)}
+}
+.sheet.readonly input:disabled{opacity:.75}
+.fam:disabled{cursor:default;opacity:.55}
+.fam:disabled[aria-pressed="true"]{opacity:1}
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.001ms!important;animation-delay:0ms!important;animation-iteration-count:1!important;transition:none!important}
 }
@@ -507,8 +525,9 @@ function renderStatus() {
     $("st-lbl").textContent = "עכשיו בדירה";
     $("st-who").textContent = `${f.em} ${f.name}`;
     const left = toN(now.end_date) - t;
-    $("st-when").textContent = rangeText(now);
-    cnt.hidden = false; $("st-num").textContent = left; $("st-unit").textContent = left === 1 ? "יום לעזיבה" : "ימים לעזיבה";
+    $("st-when").textContent = rangeText(now) + (b => b ? ` · אחריהם ${famOf(b.family).name}` : "")(fam.find(b => b !== now && b.start_date === now.end_date && toN(b.start_date) === t));
+    if (left <= 0) { cnt.hidden = true; $("st-lbl").textContent = "עוזבים היום"; }
+    else { cnt.hidden = false; $("st-num").textContent = left; $("st-unit").textContent = left === 1 ? "יום לעזיבה" : "ימים לעזיבה"; }
   } else if (next) {
     const f = famOf(next.family), d = toN(next.start_date) - t;
     $("st-lbl").textContent = "הבאים בתור";
@@ -533,7 +552,48 @@ function laneAssign(list) {
   });
   return {map: out, count: Math.max(1, lanes.length)};
 }
-const container = () => $("month").clientWidth || innerWidth;
+// shrink each label until it fits: emoji + name -> name in small type -> emoji only
+const measureCtx = document.createElement("canvas").getContext("2d");
+function textW(el, text) { const cs = getComputedStyle(el); measureCtx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`; return measureCtx.measureText(text).width; }
+function over(el) {
+  const cs = getComputedStyle(el);
+  const avail = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 1;
+  const text = el.textContent;
+  if (!el.classList.contains("short")) return textW(el, text) > avail;
+  // small type may wrap onto two lines; every word must fit its line
+  const words = text.split(/\s+/); let lines = 1, cur = "";
+  for (const w of words) {
+    if (textW(el, w) > avail) return true;
+    const next = cur ? cur + " " + w : w;
+    if (textW(el, next) > avail) { lines++; cur = w; } else cur = next;
+  }
+  return lines > 2;
+}
+function fitBars() {
+  const placed = new Map(); // week+row -> floated label ranges
+  document.querySelectorAll("#month .bar[data-name]").forEach(bar => {
+    bar.classList.remove("short", "tiny"); bar.textContent = `${bar.dataset.em} ${bar.dataset.name}`;
+    if (!over(bar)) return;
+    bar.classList.add("short"); bar.textContent = bar.dataset.name;
+    if (!over(bar)) return;
+    bar.classList.remove("short");
+    // still too narrow: float the name as a label over the empty space around the bar, if nothing is there
+    const week = bar.parentElement, lbl = document.createElement("span");
+    lbl.className = "flabel"; lbl.textContent = bar.dataset.name; bar.textContent = ""; bar.append(lbl); bar.classList.add("float");
+    const w = Math.ceil(textW(lbl, bar.dataset.name)) + 12;
+    const minL = week.offsetLeft + 2, maxL = week.offsetLeft + week.offsetWidth - w - 2;
+    const left = Math.min(Math.max(bar.offsetLeft + bar.offsetWidth / 2 - w / 2, minL), maxL);
+    const blocked = [...week.querySelectorAll(".bar")].some(o => o !== bar && o.style.gridRow === bar.style.gridRow
+      && o.offsetLeft < left + w && left < o.offsetLeft + o.offsetWidth);
+    const key = [...week.parentElement.children].indexOf(week) + ":" + bar.style.gridRow;
+    const taken = placed.get(key) || [];
+    if (!blocked && taken.some(([a, z]) => a < left + w + 2 && left < z + 2)) { bar.classList.remove("float"); bar.classList.add("tiny"); bar.textContent = bar.dataset.em; return; }
+    if (!(maxL < minL || blocked)) { taken.push([left, left + w]); placed.set(key, taken); }
+    if (maxL < minL || blocked) { bar.classList.remove("float"); bar.classList.add("tiny"); bar.textContent = bar.dataset.em; return; }
+    lbl.style.left = (left - bar.offsetLeft) + "px"; lbl.style.width = w + "px";
+  });
+}
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fitBars());
 function renderMonth(dir) {
   const {y, m} = view;
   $("mname").innerHTML = `${MONTHS[m]}<small>${y}</small>`;
@@ -580,18 +640,14 @@ function renderMonth(dir) {
       if (segS === s) bar.classList.add("s");
       if (segE === e) bar.classList.add("e");
       const name = b.family ? f.name : (b.note || f.name);
-      const halves = c2 - c1, wide = container() >= 600;
-      const satOneNight = dow(toN(b.start_date)) === 6 && nightsOf(b) === 1;
-      if (halves <= 1 && !wide && satOneNight && segS === s) { bar.classList.add("short", "spill"); const sp = document.createElement("span"); sp.textContent = name; bar.append(sp); }
-      else if (halves <= 1 && !wide) { bar.classList.add("tiny"); bar.textContent = f.em; }
-      else if (halves <= 4 && !wide) { bar.classList.add("short"); bar.textContent = name; }
-      else bar.textContent = `${f.em} ${name}`;
+      bar.dataset.em = f.em; bar.dataset.name = name; bar.textContent = `${f.em} ${name}`;
       bar.title = `${f.name} · ${rangeText(b)}${b.note ? " · " + b.note : ""}`;
       bar.onclick = ev => { ev.stopPropagation(); openSheet(b); };
       week.append(bar);
     });
     month.append(week);
   }
+  fitBars();
   const lg = $("legend"); lg.innerHTML = "";
   const used = [...new Set(visible.map(b => b.family).filter(Boolean))];
   if (!used.length) lg.innerHTML = `<span>החודש פנוי לגמרי. לחצו על יום כדי לסגור אותו.</span>`;
@@ -653,7 +709,12 @@ function openSheet(b, s, e) {
   $("sh-end").value = b ? b.end_date : (e || toS(localToday() + 1));
   $("sh-note").value = b?.note || "";
   $("sh-save").textContent = b ? "שמירת שינויים" : "סגירת הדירה";
-  const del = $("sh-del"); del.hidden = !b; del.textContent = "מחיקה"; del.classList.remove("sure");
+  const del = $("sh-del"); del.hidden = !b; del.textContent = "מחיקה"; del.classList.remove("sure"); del.disabled = false;
+  const ro = !!(b && !b.family);
+  $("sheet").classList.toggle("readonly", ro);
+  ["sh-start","sh-end","sh-note"].forEach(id => $(id).disabled = ro);
+  $("sh-save").hidden = ro; del.hidden = !b || ro;
+  $("sh-cancel").textContent = ro ? "סגירה" : "ביטול";
   renderSheetFams(); validate();
   $("sheet-host").hidden = false;
   setTimeout(() => (chosen ? $("sh-save") : $("sh-fams").querySelector("button"))?.focus({preventScroll:true}), 60);
@@ -663,6 +724,7 @@ function renderSheetFams() {
   const box = $("sh-fams"); box.innerHTML = "";
   FAMS.forEach(f => {
     const b = famChip(f, f.id === chosen);
+    if (editing && !editing.family) b.disabled = true;
     b.onclick = () => { chosen = f.id; renderSheetFams(); validate(); };
     box.append(b);
   });
@@ -675,7 +737,7 @@ function currentDraft() {
 }
 function validate() {
   const d = currentDraft(), warn = $("sh-warn");
-  let ok = !!(d.start_date && d.end_date) && (!!d.family || (editing && !editing.family));
+  let ok = !!(d.start_date && d.end_date) && !!d.family;
   if (d.start_date && d.end_date) {
     const n = nightsOf(d);
     $("sh-sub").textContent = `${rangeText(d)} · ${nightsText(n)}`;
@@ -686,7 +748,8 @@ function validate() {
       warn.textContent = "שימו לב: חופף ל" + hits.map(b => `${famOf(b.family).name} (${rangeText(b)})`).join(", ") + ". אפשר לשמור, רק תתאמו ביניכם 🙂";
     } else warn.hidden = true;
   } else { $("sh-sub").textContent = "בחרו תאריכים"; warn.hidden = true; }
-  if (!d.family && !(editing && !editing.family)) $("sh-sub").textContent += " · בחרו מי מגיע";
+  if (editing && !editing.family) { warn.hidden = true; $("sh-sub").textContent = `${rangeText(editing)} · ${editing.note || "חג"}`; }
+  else if (!d.family) $("sh-sub").textContent += " · בחרו מי מגיע";
   $("sh-save").disabled = !ok;
 }
 ["sh-start","sh-end"].forEach(id => $(id).addEventListener("input", validate));
@@ -694,9 +757,16 @@ $("sheet").addEventListener("submit", async ev => {
   ev.preventDefault();
   const d = currentDraft(); if ($("sh-save").disabled) return;
   const save = $("sh-save"); save.disabled = true; save.textContent = "שומר…";
+  const ed = editing;
   try {
-    if (editing) {
-      const [row] = await api("PATCH", "?id=eq." + editing.id, d);
+    if (ed) {
+      const [row] = await api("PATCH", "?id=eq." + ed.id, d);
+      if (!row) {
+        bookings = bookings.filter(b => b.id !== ed.id);
+        lastJson = ""; closeSheet(); renderAll(false); load();
+        toast("ההזמנה הזאת נמחקה בינתיים על ידי מישהו אחר", true);
+        return;
+      }
       bookings = bookings.map(b => b.id === row.id ? row : b);
       toast("השינויים נשמרו");
     } else {
@@ -710,16 +780,17 @@ $("sheet").addEventListener("submit", async ev => {
     lastJson = ""; closeSheet(); renderAll(true); setSync(true);
   } catch (e) {
     setSync(false); toast("לא הצלחנו לשמור. בדקו את החיבור ונסו שוב.", true);
-    save.disabled = false; save.textContent = editing ? "שמירת שינויים" : "סגירת הדירה";
+    save.disabled = false; save.textContent = ed ? "שמירת שינויים" : "סגירת הדירה";
   }
 });
 $("sh-del").onclick = async () => {
   const del = $("sh-del");
   if (!delArmed) { delArmed = true; del.classList.add("sure"); del.textContent = "בטוח? ללחוץ שוב"; return; }
   del.disabled = true;
+  const id = editing.id;
   try {
-    await api("DELETE", "?id=eq." + editing.id);
-    bookings = bookings.filter(b => b.id !== editing.id);
+    await api("DELETE", "?id=eq." + id);
+    bookings = bookings.filter(b => b.id !== id);
     lastJson = ""; closeSheet(); renderAll(false); toast("ההזמנה נמחקה");
   } catch (e) { toast("המחיקה לא הצליחה. נסו שוב.", true); }
   del.disabled = false;
