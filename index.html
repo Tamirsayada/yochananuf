@@ -150,7 +150,7 @@ h1 span{display:inline-block; animation:rise .9s cubic-bezier(.2,.9,.25,1.25) bo
 @keyframes slidePrev{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
 .week{
   display:grid; grid-template-columns:repeat(14,minmax(0,1fr));
-  grid-template-rows:30px repeat(var(--lanes,1),22px) minmax(10px,1fr);
+  grid-template-rows:30px repeat(var(--lanes,1),30px) minmax(8px,1fr);
   row-gap:3px; min-height:84px; border-top:1px solid var(--line);
 }
 .day{
@@ -174,14 +174,18 @@ h1 span{display:inline-block; animation:rise .9s cubic-bezier(.2,.9,.25,1.25) bo
 .day.sat .n, .day.fri .n{color:var(--sea)}
 .day.today.sat .n,.day.today.fri .n{color:#fff}
 .bar{
-  position:relative; z-index:1; height:22px; border:0; padding:0 7px; margin:0 1px;
-  background:var(--c); color:#fff; font-size:12.5px; font-weight:800; line-height:22px;
+  position:relative; z-index:1; height:30px; border:0; padding:0 7px; margin:0 1px;
+  background:var(--c); color:#fff; font-size:12.5px; font-weight:800; line-height:30px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:start; border-radius:4px;
   transform-origin:right center; animation:grow .5s cubic-bezier(.2,.9,.3,1) both; animation-delay:var(--d,0ms);
   box-shadow:0 2px 6px -2px color-mix(in srgb,var(--c) 70%,transparent);
 }
 .bar.s{border-start-start-radius:11px;border-end-start-radius:11px;margin-inline-start:3px}
 .bar.e{border-start-end-radius:11px;border-end-end-radius:11px;margin-inline-end:3px}
+.bar.short{white-space:normal;text-overflow:clip;line-height:1.05;font-size:11px;padding:0 3px;display:flex;align-items:center;justify-content:center;text-align:center;overflow-wrap:anywhere}
+.bar.spill{overflow:visible;z-index:2}
+.bar.spill span{position:absolute;left:0;top:0;bottom:0;display:flex;align-items:center;white-space:nowrap;padding:0 6px;border-radius:11px;background:var(--c)}
+.bar.tiny{padding:0;justify-content:center;display:flex;align-items:center;font-size:12px}
 .bar.holiday{background:repeating-linear-gradient(135deg,var(--f-holiday) 0 6px,color-mix(in srgb,var(--f-holiday) 70%,#fff) 6px 12px);color:#12343b;box-shadow:none}
 .bar.clash{outline:2px dashed var(--danger);outline-offset:1px}
 .bar:hover{filter:brightness(1.07)}
@@ -208,12 +212,6 @@ h1 span{display:inline-block; animation:rise .9s cubic-bezier(.2,.9,.25,1.25) bo
 .free button:hover{background:color-mix(in srgb,var(--sea) 10%,transparent);transform:translateY(-2px)}
 .free b{display:block;font-family:var(--num);font-weight:600;font-variant-numeric:tabular-nums;color:var(--sea)}
 .free span{font-size:12px;color:var(--ink-soft)}
-.board{display:grid;gap:8px;margin-top:14px}
-.board .row{display:grid;grid-template-columns:140px 1fr 34px;gap:10px;align-items:center;font-size:14px}
-.board .row .nm{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.board .track{height:10px;border-radius:5px;background:var(--muted);overflow:hidden}
-.board .fill{height:100%;border-radius:5px;background:var(--c);transform-origin:right;animation:grow .9s cubic-bezier(.2,.9,.3,1) both;animation-delay:var(--d,0ms)}
-.board .v{font-family:var(--num);font-variant-numeric:tabular-nums;text-align:start;color:var(--ink-soft)}
 .empty{color:var(--ink-soft);font-size:14px;margin:4px 0}
 
 /* ---------- FAB / hint ---------- */
@@ -292,7 +290,7 @@ footer{margin-top:28px;text-align:center;color:var(--ink-soft);font-size:13px}
 .sync.off i{background:var(--danger)}
 
 @media (prefers-reduced-motion: reduce){
-  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition:none!important}
+  *,*::before,*::after{animation-duration:.001ms!important;animation-delay:0ms!important;animation-iteration-count:1!important;transition:none!important}
 }
 </style>
 </head>
@@ -352,8 +350,6 @@ footer{margin-top:28px;text-align:center;color:var(--ink-soft);font-size:13px}
     <div class="panel">
       <h4>סופ״שים פנויים</h4>
       <div class="free" id="free"></div>
-      <h4 style="margin-top:18px">טבלת הנופשים <span id="yr"></span> · לילות</h4>
-      <div class="board" id="board"></div>
     </div>
   </div>
 
@@ -537,6 +533,7 @@ function laneAssign(list) {
   });
   return {map: out, count: Math.max(1, lanes.length)};
 }
+const container = () => $("month").clientWidth || innerWidth;
 function renderMonth(dir) {
   const {y, m} = view;
   $("mname").innerHTML = `${MONTHS[m]}<small>${y}</small>`;
@@ -582,8 +579,13 @@ function renderMonth(dir) {
       bar.style.setProperty("--d", (barIdx++ * 45) + "ms");
       if (segS === s) bar.classList.add("s");
       if (segE === e) bar.classList.add("e");
-      const label = b.family ? `${f.em} ${f.name}` : `${f.em} ${b.note || f.name}`;
-      bar.textContent = label;
+      const name = b.family ? f.name : (b.note || f.name);
+      const halves = c2 - c1, wide = container() >= 600;
+      const satOneNight = dow(toN(b.start_date)) === 6 && nightsOf(b) === 1;
+      if (halves <= 1 && !wide && satOneNight && segS === s) { bar.classList.add("short", "spill"); const sp = document.createElement("span"); sp.textContent = name; bar.append(sp); }
+      else if (halves <= 1 && !wide) { bar.classList.add("tiny"); bar.textContent = f.em; }
+      else if (halves <= 4 && !wide) { bar.classList.add("short"); bar.textContent = name; }
+      else bar.textContent = `${f.em} ${name}`;
       bar.title = `${f.name} · ${rangeText(b)}${b.note ? " · " + b.note : ""}`;
       bar.onclick = ev => { ev.stopPropagation(); openSheet(b); };
       week.append(bar);
@@ -638,16 +640,6 @@ function renderLists() {
     fr.append(btn);
   }
   if (!found) fr.append(el("p", "empty", "כל הסופ״שים הקרובים תפוסים."));
-  // leaderboard for the viewed year
-  const yr = view.y; $("yr").textContent = yr;
-  const tally = Object.fromEntries(FAMS.map(f => [f.id, 0]));
-  bookings.forEach(b => { if (b.family && b.start_date.startsWith(String(yr))) tally[b.family] += Math.max(1, nightsOf(b)); });
-  const max = Math.max(1, ...Object.values(tally));
-  const bd = $("board"); bd.innerHTML = "";
-  FAMS.map(f => [f, tally[f.id]]).sort((a,b) => b[1]-a[1]).forEach(([f, v], i) => {
-    const r = el("div", "row", `<span class="nm">${f.em} ${esc(f.name)}</span><div class="track"><div class="fill" style="width:${v/max*100}%;--c:${f.c};--d:${i*80}ms"></div></div><span class="v">${v}</span>`);
-    bd.append(r);
-  });
 }
 function renderAll(anim) { renderStatus(); renderMonth(anim ? 1 : 0); renderLists(); }
 
@@ -742,6 +734,7 @@ $("prev").onclick = () => shift(-1);
 $("next").onclick = () => shift(1);
 $("today-btn").onclick = () => { const d = new Date(localToday()*DAY); const k = (d.getUTCFullYear()-view.y)*12 + d.getUTCMonth()-view.m; view = {y:d.getUTCFullYear(), m:d.getUTCMonth()}; renderMonth(Math.sign(k)); renderLists(); };
 $("fab").onclick = () => openSheet(null);
+let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => renderMonth(0), 150); });
 $("hint-x").onclick = cancelPick;
 // swipe between months (RTL: swipe left = next month)
 let tx = null;
