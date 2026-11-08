@@ -19,10 +19,10 @@ language sql
 security definer
 set search_path = public
 as $$
-  insert into public.keepalive (id, pinged_at, pings)
+  insert into public.keepalive as k (id, pinged_at, pings)
   values (1, now(), 1)
   on conflict (id) do update
-    set pinged_at = now(), pings = public.keepalive.pings + 1
+    set pinged_at = now(), pings = k.pings + 1
   returning pinged_at;
 $$;
 
